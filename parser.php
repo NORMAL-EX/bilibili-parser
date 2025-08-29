@@ -1,14 +1,13 @@
 <?php
 /**
- * B站视频解析器 API (增强版)
- * 支持批量解析、多格式支持
+ * B站视频解析器 API v2.1
+ * 修复403问题，添加下载说明
  * 仅供个人学习使用
  */
 
 class BilibiliParser {
     private $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     public $cookie = '';
-    private $multiCurl = null;
     
     /**
      * 批量解析视频
@@ -17,7 +16,6 @@ class BilibiliParser {
         $results = [];
         $bvids = [];
         
-        // 提取所有BV号
         foreach ($inputs as $key => $input) {
             $bvid = $this->extractBvid($input);
             if ($bvid) {
@@ -27,10 +25,8 @@ class BilibiliParser {
             }
         }
         
-        // 批量获取视频信息
         $videoInfos = $this->getVideoInfoBatch($bvids);
         
-        // 批量获取播放信息
         $playInfoRequests = [];
         foreach ($videoInfos as $key => $info) {
             if (isset($info['error'])) {
@@ -46,7 +42,6 @@ class BilibiliParser {
         if (!empty($playInfoRequests)) {
             $playInfos = $this->getPlayInfoBatch($playInfoRequests);
             
-            // 组合结果
             foreach ($playInfos as $key => $playInfo) {
                 if (isset($playInfo['error'])) {
                     $results[$key] = $playInfo;
@@ -68,13 +63,11 @@ class BilibiliParser {
             return ['error' => '无效的BV号或链接'];
         }
         
-        // 获取视频信息
         $videoInfo = $this->getVideoInfo($bvid);
         if (!$videoInfo) {
             return ['error' => '获取视频信息失败'];
         }
         
-        // 获取视频流信息
         $playInfo = $this->getPlayInfo($bvid, $videoInfo['cid'], $quality);
         if (!$playInfo) {
             return ['error' => '获取视频流信息失败'];
@@ -89,26 +82,21 @@ class BilibiliParser {
     private function extractBvid($input) {
         $input = trim($input);
         
-        // 支持多种输入格式
         if (preg_match('/^BV[a-zA-Z0-9]+$/i', $input)) {
             return $input;
         }
         
-        // 支持短链接
         if (preg_match('/b23\.tv\/([a-zA-Z0-9]+)/', $input, $matches)) {
-            // 需要请求短链接获取真实BV号
             $realUrl = $this->getRealUrl('https://b23.tv/' . $matches[1]);
             if ($realUrl && preg_match('/BV[a-zA-Z0-9]+/i', $realUrl, $bvMatches)) {
                 return $bvMatches[0];
             }
         }
         
-        // 从URL中提取BV号
         if (preg_match('/BV[a-zA-Z0-9]+/i', $input, $matches)) {
             return $matches[0];
         }
         
-        // 支持av号
         if (preg_match('/av(\d+)/i', $input, $matches)) {
             return $this->av2bv($matches[1]);
         }
@@ -239,10 +227,9 @@ class BilibiliParser {
     }
     
     /**
-     * 获取视频播放信息（支持多种质量）
+     * 获取视频播放信息
      */
     private function getPlayInfo($bvid, $cid, $quality = 80) {
-        // 质量参数映射
         $qualityMap = [
             '8K' => 127,
             '4K' => 120,
@@ -274,11 +261,9 @@ class BilibiliParser {
     private function parsePlayInfo($data) {
         $result = [];
         
-        // 处理DASH格式
         if (isset($data['dash'])) {
             $dash = $data['dash'];
             
-            // 获取所有视频流
             $videos = [];
             foreach ($dash['video'] as $video) {
                 $videos[] = [
@@ -295,12 +280,10 @@ class BilibiliParser {
                 ];
             }
             
-            // 按质量排序
             usort($videos, function($a, $b) {
                 return $b['quality_id'] - $a['quality_id'];
             });
             
-            // 获取音频流
             $audios = [];
             foreach ($dash['audio'] as $audio) {
                 $audios[] = [
@@ -312,7 +295,6 @@ class BilibiliParser {
                 ];
             }
             
-            // 按带宽排序
             usort($audios, function($a, $b) {
                 return $b['bandwidth'] - $a['bandwidth'];
             });
@@ -321,17 +303,14 @@ class BilibiliParser {
             $result['audios'] = $audios;
             $result['format'] = 'dash';
             
-            // 支持FLV降级
             if (isset($dash['flac'])) {
                 $result['flac'] = $dash['flac'];
             }
             
-            // 支持杜比音效
             if (isset($dash['dolby'])) {
                 $result['dolby'] = $dash['dolby'];
             }
         }
-        // 处理FLV格式
         else if (isset($data['durl'])) {
             $result['videos'] = [];
             foreach ($data['durl'] as $item) {
@@ -376,7 +355,6 @@ class BilibiliParser {
             ]
         ];
         
-        // 选择最接近目标质量的视频
         $selectedVideo = null;
         if (isset($playInfo['videos']) && count($playInfo['videos']) > 0) {
             foreach ($playInfo['videos'] as $video) {
@@ -386,12 +364,10 @@ class BilibiliParser {
                 }
             }
             if (!$selectedVideo) {
-                // 选择最高质量
                 $selectedVideo = $playInfo['videos'][0];
             }
         }
         
-        // 构建下载信息
         $downloadInfo = [];
         
         if ($playInfo['format'] === 'dash') {
@@ -417,7 +393,6 @@ class BilibiliParser {
                 ];
             }
             
-            // 所有可用质量
             $downloadInfo['available_quality'] = [];
             foreach ($playInfo['videos'] as $v) {
                 $downloadInfo['available_quality'][] = [
@@ -429,7 +404,6 @@ class BilibiliParser {
                 ];
             }
             
-            // 特殊格式
             if (isset($playInfo['flac'])) {
                 $downloadInfo['flac'] = $playInfo['flac'];
             }
@@ -437,16 +411,24 @@ class BilibiliParser {
                 $downloadInfo['dolby'] = $playInfo['dolby'];
             }
             
+            // 重要提示：下载说明
+            $downloadInfo['important_notice'] = '⚠️ 重要：链接不能直接在浏览器打开（会403），必须用下载工具并添加Referer头';
+            $downloadInfo['download_instructions'] = [
+                'curl' => 'curl -H "Referer: https://www.bilibili.com" -H "User-Agent: Mozilla/5.0" -o video.mp4 "视频URL"',
+                'wget' => 'wget --referer="https://www.bilibili.com" --user-agent="Mozilla/5.0" -O video.mp4 "视频URL"',
+                'ffmpeg' => 'ffmpeg -headers "Referer: https://www.bilibili.com" -i "视频URL" -i "音频URL" -c copy output.mp4',
+                'aria2c' => 'aria2c --header="Referer: https://www.bilibili.com" --user-agent="Mozilla/5.0" -o video.mp4 "视频URL"'
+            ];
             $downloadInfo['merge_command'] = 'ffmpeg -i video.mp4 -i audio.mp4 -c copy output.mp4';
         } else {
             if ($selectedVideo) {
                 $downloadInfo['video'] = $selectedVideo;
             }
+            $downloadInfo['important_notice'] = '⚠️ 重要：链接不能直接在浏览器打开（会403），必须用下载工具并添加Referer头';
         }
         
         $result['data']['download'] = $downloadInfo;
         
-        // 添加提示信息
         if ($selectedVideo) {
             if ($selectedVideo['quality_id'] == $preferredQuality) {
                 $result['data']['tips'] = '成功获取' . $selectedVideo['quality'] . '视频';
@@ -458,6 +440,83 @@ class BilibiliParser {
         }
         
         return $result;
+    }
+    
+    /**
+     * 创建下载器PHP脚本
+     */
+    public function generateDownloader($videoUrl, $audioUrl = null, $filename = 'video') {
+        $script = '<?php
+/**
+ * B站视频下载器脚本
+ * 自动生成，用于下载视频和音频
+ */
+
+$videoUrl = \'' . addslashes($videoUrl) . '\';
+' . ($audioUrl ? '$audioUrl = \'' . addslashes($audioUrl) . '\';' : '') . '
+$filename = \'' . addslashes($filename) . '\';
+
+function downloadWithReferer($url, $outputFile) {
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        \'Referer: https://www.bilibili.com\',
+        \'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\'
+    ]);
+    curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function($resource, $downloadSize, $downloaded) {
+        if ($downloadSize > 0) {
+            $percent = round($downloaded / $downloadSize * 100, 2);
+            echo "\r下载进度: " . $percent . "%";
+        }
+    });
+    curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+    
+    $fp = fopen($outputFile, \'wb\');
+    curl_setopt($ch, CURLOPT_FILE, $fp);
+    
+    $result = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    
+    curl_close($ch);
+    fclose($fp);
+    
+    if ($httpCode !== 200) {
+        unlink($outputFile);
+        return false;
+    }
+    
+    return true;
+}
+
+echo "开始下载视频...\n";
+if (downloadWithReferer($videoUrl, $filename . ".mp4")) {
+    echo "\n视频下载完成！\n";
+} else {
+    echo "\n视频下载失败！\n";
+}
+';
+
+        if ($audioUrl) {
+            $script .= '
+echo "开始下载音频...\n";
+if (downloadWithReferer($audioUrl, $filename . "_audio.mp4")) {
+    echo "\n音频下载完成！\n";
+    echo "请使用以下命令合并音视频：\n";
+    echo "ffmpeg -i " . $filename . ".mp4 -i " . $filename . "_audio.mp4 -c copy " . $filename . "_merged.mp4\n";
+} else {
+    echo "\n音频下载失败！\n";
+}
+';
+        }
+
+        $script .= '
+?>';
+        return $script;
     }
     
     /**
@@ -482,7 +541,7 @@ class BilibiliParser {
      */
     private function estimateSize($bandwidth, $duration) {
         if ($bandwidth && $duration) {
-            $bytes = ($bandwidth * $duration) / 8000; // 转换为字节
+            $bytes = ($bandwidth * $duration) / 8000;
             return $this->formatFileSize($bytes);
         }
         return null;
@@ -519,7 +578,7 @@ class BilibiliParser {
     }
     
     /**
-     * 并发HTTP GET请求（优化速度）
+     * 并发HTTP GET请求
      */
     private function multiHttpGet($urls) {
         $mh = curl_multi_init();
@@ -593,36 +652,48 @@ class BilibiliParser {
 
 // ========== API 接口处理 ==========
 
-// 设置响应头
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 
-// 初始化响应
 $response = [
     'code' => -1,
     'message' => '',
     'data' => null
 ];
 
-// 创建解析器实例
 $parser = new BilibiliParser();
 
-// 设置cookie（如果提供）
 if (isset($_GET['cookie']) && !empty($_GET['cookie'])) {
     $parser->cookie = $_GET['cookie'];
 }
 
-// 判断是否批量解析
+// 生成下载器脚本
+if (isset($_GET['generate_downloader'])) {
+    if (!isset($_GET['video_url']) || empty($_GET['video_url'])) {
+        $response['message'] = '缺少视频URL';
+        echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        exit;
+    }
+    
+    $videoUrl = $_GET['video_url'];
+    $audioUrl = $_GET['audio_url'] ?? null;
+    $filename = $_GET['filename'] ?? 'video';
+    
+    $script = $parser->generateDownloader($videoUrl, $audioUrl, $filename);
+    
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Content-Disposition: attachment; filename="download_' . $filename . '.php"');
+    echo $script;
+    exit;
+}
+
+// 批量解析
 if (isset($_GET['batch'])) {
-    // 批量解析模式
     $inputs = [];
     
-    // 支持多种批量输入方式
     if (isset($_GET['bv'])) {
-        // 逗号分隔
         $inputs = array_map('trim', explode(',', $_GET['bv']));
     } else if (isset($_GET['list'])) {
-        // JSON数组
         $inputs = json_decode($_GET['list'], true);
     } else {
         $response['message'] = '批量模式需要提供bv参数（逗号分隔）或list参数（JSON数组）';
@@ -658,7 +729,7 @@ if (isset($_GET['batch'])) {
         $response['message'] = '批量解析异常：' . $e->getMessage();
     }
 } else {
-    // 单个解析模式
+    // 单个解析
     if (!isset($_GET['bv']) || empty($_GET['bv'])) {
         $response['message'] = '缺少参数：bv（BV号或视频链接）';
         echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -683,6 +754,40 @@ if (isset($_GET['batch'])) {
     }
 }
 
-// 输出JSON响应
 echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+
+/* 
+重要说明 - 关于403错误
+========================
+
+B站的音视频链接不能直接在浏览器中打开，会返回403 Forbidden错误。
+这是因为B站CDN服务器会验证请求的Referer头。
+
+正确的下载方法：
+
+1. 使用curl下载（推荐）:
+   curl -H "Referer: https://www.bilibili.com" -H "User-Agent: Mozilla/5.0" -o video.mp4 "视频URL"
+   curl -H "Referer: https://www.bilibili.com" -H "User-Agent: Mozilla/5.0" -o audio.mp4 "音频URL"
+
+2. 使用wget下载:
+   wget --referer="https://www.bilibili.com" --user-agent="Mozilla/5.0" -O video.mp4 "视频URL"
+   wget --referer="https://www.bilibili.com" --user-agent="Mozilla/5.0" -O audio.mp4 "音频URL"
+
+3. 使用ffmpeg直接合并:
+   ffmpeg -headers "Referer: https://www.bilibili.com" -i "视频URL" -headers "Referer: https://www.bilibili.com" -i "音频URL" -c copy output.mp4
+
+4. 使用aria2c下载:
+   aria2c --header="Referer: https://www.bilibili.com" --user-agent="Mozilla/5.0" -o video.mp4 "视频URL"
+   aria2c --header="Referer: https://www.bilibili.com" --user-agent="Mozilla/5.0" -o audio.mp4 "音频URL"
+
+5. 生成PHP下载脚本:
+   访问: parser.php?generate_downloader=1&video_url=视频URL&audio_url=音频URL&filename=文件名
+   这会生成一个可以直接运行的PHP下载脚本
+
+注意事项：
+- 链接有时效性，通常在几小时内有效
+- 必须添加Referer头: https://www.bilibili.com
+- 建议同时设置User-Agent
+- 高画质视频可能需要登录Cookie
+*/
 ?>
