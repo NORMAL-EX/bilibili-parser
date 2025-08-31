@@ -361,7 +361,7 @@ curl_setopt($ch, CURLOPT_PROXY, 'http://proxy.example.com:8080');
 
 ## 📋 Changelog
 
-### v2.0.0 (2024-12)
+### v2.0.0 (2025-8)
 - ✨ Added batch parsing feature
 - ⚡ Implemented concurrent request optimization
 - 🎬 Support more video formats
@@ -369,7 +369,7 @@ curl_setopt($ch, CURLOPT_PROXY, 'http://proxy.example.com:8080');
 - 📊 Added file size estimation
 - 🎵 Support Dolby audio and lossless audio
 
-### v1.0.0 (2024-12)
+### v1.0.0 (2025-8)
 - 🎉 Initial release
 - ✅ Basic parsing functionality
 - ✅ 1080P priority support
